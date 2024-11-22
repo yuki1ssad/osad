@@ -35,4 +35,4 @@ python train.py --dataset=hyperkvasir   --dataset_root=/root/autodl-tmp/ad_wxf/a
 python train.py --dataset=hyperkvasir   --dataset_root=/root/autodl-tmp/ad_wxf/ad_dataset/hyperkvasir_anomaly_detection --classname=hyperkvasir     --know_class=esophagitis-b-d        --nAnomaly=1
 
 
-# nohup ./run_hard.sh > hard_mvtec_1.log 2>&1 &
+# nohup ./run_hard_1.sh > hard_1.log 2>&1 &
