@@ -24,16 +24,17 @@ class MVTecAD(BaseADDataset):
         self.transform = self.transform_train() if self.train else self.transform_test()
         self.transform_pseudo = self.transform_pseudo()
 
-        normal_data = list()
-        split = 'train'
-        normal_files = os.listdir(os.path.join(self.root, split, 'good'))
-        for file in normal_files:
-            if 'png' in file[-3:] or 'PNG' in file[-3:] or 'jpg' in file[-3:] or 'npy' in file[-3:]:
-                normal_data.append(split + '/good/' + file)
+        if self.train:
+            normal_data = list()
+            split = 'train'
+            normal_files = os.listdir(os.path.join(self.root, split, 'good'))
+            for file in normal_files:
+                if 'png' in file[-3:] or 'PNG' in file[-3:] or 'jpg' in file[-3:] or 'npy' in file[-3:]:
+                    normal_data.append(split + '/good/' + file)
 
-        self.nPollution = int((len(normal_data)/(1-self.pollution_rate)) * self.pollution_rate)
-        if self.test_threshold==0 and self.args.test_rate>0:
-            self.test_threshold = int((len(normal_data)/(1-self.args.test_rate)) * self.args.test_rate) + self.args.nAnomaly
+            self.nPollution = int((len(normal_data)/(1-self.pollution_rate)) * self.pollution_rate)
+            if self.test_threshold==0 and self.args.test_rate>0:
+                self.test_threshold = int((len(normal_data)/(1-self.args.test_rate)) * self.args.test_rate) + self.args.nAnomaly
 
         self.ood_data = self.get_ood_data()
 
@@ -151,7 +152,7 @@ class MVTecAD(BaseADDataset):
         rnd = random.randint(0, 1)
         if index in self.normal_idx and rnd == 0 and self.train:
             if self.ood_data is None:
-                index = random.choice(self.normal_idx)
+                index = random.choice(self.normal_idx)  # 从序列中随机选择一个元素
                 image = self.load_image(os.path.join(self.root, self.images[index]))
                 transform = self.transform_pseudo
             else:
