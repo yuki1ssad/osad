@@ -8,16 +8,17 @@ import os
 from dataloaders.dataloader import initDataloader
 from modeling.net import DRA
 from tqdm import tqdm
-from sklearn.metrics import average_precision_score, roc_auc_score
+from sklearn.metrics import average_precision_score, roc_auc_score, roc_curve, auc
 from modeling.layers import build_criterion
 import random
 
 import matplotlib.pyplot as plt
 from datetime import datetime
 import copy
+from torch.utils.tensorboard import SummaryWriter
 
 WEIGHT_DIR = './weights'
-
+writer = SummaryWriter('runs/logs')
 
 class Trainer(object):
 
@@ -105,6 +106,7 @@ class Trainer(object):
                 class_loss[i] += losses[i].item()
 
             tbar.set_description('Epoch:%d, Train loss: %.3f' % (epoch, train_loss / (idx + 1)))
+            writer.add_scalar('train_loss', loss.item(), epoch * len(self.train_loader) + sample['image'].shape[0])
 
 
     def normalization(self, data):
@@ -166,6 +168,7 @@ class Trainer(object):
         with open(self.args.experiment_dir + '/result.txt', mode='a+', encoding="utf-8") as w:
             for label, score in zip(total_target, total_pred):
                 w.write(str(label) + '   ' + str(score) + "\n")
+            w.write("AUC-ROC: " + str(total_roc) + "\nAUC-PR: " + str(total_pr))
 
         total_roc, total_pr = aucPerformance(total_pred, total_target)
 
@@ -176,6 +179,8 @@ class Trainer(object):
         plt.bar(np.arange(total_pred.size)[outlier_mask], total_pred[outlier_mask], color='red')
         plt.ylabel("Anomaly score")
         plt.savefig(args.experiment_dir + "/vis.png")
+
+        printROCcurve(total_pred, total_target)
         return total_roc, total_pr
 
     def save_weights(self, filename):
@@ -202,6 +207,22 @@ def aucPerformance(mse, labels, prt=True):
     if prt:
         print("AUC-ROC: %.4f, AUC-PR: %.4f" % (roc_auc, ap))
     return roc_auc, ap
+
+def printROCcurve(total_pred, total_target):
+    fpr, tpr, thresholds = roc_curve(total_target, total_pred)
+    roc_auc = auc(fpr, tpr)
+    plt.figure()
+    lw = 2  # 线宽
+    plt.plot(fpr, tpr, color='darkorange', lw=lw, label=f'ROC curve (area = {roc_auc:.2f})')
+    plt.plot([0, 1], [0, 1], color='navy', lw=lw, linestyle='--')
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    # plt.title('Receiver Operating Characteristic Example')
+    plt.legend(loc='lower right')
+    # plt.show()
+    plt.savefig(args.experiment_dir + "/roc_curve.png")
 
 def getExperPath(args):
     subName = ""
@@ -269,6 +290,7 @@ if __name__ == '__main__':
     trainer.criterion = trainer.criterion.to('cuda')
     for epoch in range(0, trainer.args.epochs):
         trainer.training(epoch)
+    writer.close()
     trainer.eval()
     trainer.save_weights(args.savename)
 
