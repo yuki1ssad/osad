@@ -6,7 +6,7 @@ import argparse
 import os
 
 from dataloaders.dataloader import initDataloader
-from modeling.net import DRA
+from modeling.net_00 import DRA
 from tqdm import tqdm
 from sklearn.metrics import average_precision_score, roc_auc_score, roc_curve, auc
 from modeling.layers import build_criterion
@@ -18,6 +18,7 @@ import copy
 from torch.utils.tensorboard import SummaryWriter
 
 WEIGHT_DIR = './weights'
+
 writer = SummaryWriter('runs/logs')
 
 class Trainer(object):
@@ -27,12 +28,12 @@ class Trainer(object):
         # Define Dataloader
         kwargs = {'num_workers': args.workers}
         self.train_loader, self.test_loader= initDataloader.build(args, **kwargs)
-        if self.args.total_heads == 4:
-            temp_args = copy.deepcopy(args)
-            temp_args.batch_size = self.args.nRef
-            temp_args.nAnomaly = 0
-            self.ref_loader, _ = initDataloader.build(temp_args, **kwargs)
-            self.ref = iter(self.ref_loader)
+        # if self.args.total_heads == 4:
+        #     temp_args = copy.deepcopy(args)
+        #     temp_args.batch_size = self.args.nRef
+        #     temp_args.nAnomaly = 0
+        #     self.ref_loader, _ = initDataloader.build(temp_args, **kwargs)
+        #     self.ref = iter(self.ref_loader)
 
         self.model = DRA(args, backbone=self.args.backbone)
 
@@ -50,17 +51,22 @@ class Trainer(object):
         if eval:
             targets.append(target==0)
             targets.append(target)
-            targets.append(target)
-            targets.append(target)
+            targets.append(target) 
             return targets
         else:
-            temp_t = target != 0
             targets.append(target == 0)
-            targets.append(temp_t[target != 2])
-            targets.append(temp_t[target != 1])
+            targets.append(target != 0)
             targets.append(target != 0)
         return targets
 
+    def lossComps(self, protosList, n_featuresList):
+        tmp = []
+        for proto, n_features in zip(protosList, n_featuresList):
+            b, c, h, w = n_features.shape
+            loss = torch.abs(n_features - proto.repeat([b, 1, 1, 1])).mean()
+            tmp.append(loss)
+        return torch.stack(tmp).mean()
+    
     def training(self, epoch):
         train_loss = 0.0
         class_loss = list()
@@ -73,16 +79,8 @@ class Trainer(object):
             image, target = sample['image'], sample['label']
             if self.args.cuda:
                 image, target = image.cuda(), target.cuda()
-            if self.args.total_heads == 4:
-                try:
-                    ref_image = next(self.ref)['image']
-                except StopIteration:
-                    self.ref = iter(self.ref_loader)
-                    ref_image = next(self.ref)['image']
-                ref_image = ref_image.cuda()
-                image = torch.cat([ref_image, image], dim=0)
 
-            outputs, tmpLoss = self.model(image, target)     # 四个头，每个头为每张图输出一个分数
+            outputs, protosList, n_featuresList = self.model(image, target)
             targets = self.generate_target(target)
 
             losses = list()
@@ -92,7 +90,9 @@ class Trainer(object):
                     losses.append(self.criterion(prob, targets[i].long()).view(-1, 1))
                 else:
                     losses.append(self.criterion(outputs[i], targets[i].float()).view(-1, 1))
-            losses.append(tmpLoss.view(-1, 1))
+
+            losses.append(self.lossComps(protosList, n_featuresList).view(-1, 1))
+
             loss = torch.cat(losses)
             loss = torch.sum(loss)
 
@@ -125,17 +125,8 @@ class Trainer(object):
             if self.args.cuda:
                 image, target = image.cuda(), target.cuda()
 
-            if self.args.total_heads == 4:
-                try:
-                    ref_image = next(self.ref)['image']
-                except StopIteration:
-                    self.ref = iter(self.ref_loader)
-                    ref_image = next(self.ref)['image']
-                ref_image = ref_image.cuda()
-                image = torch.cat([ref_image, image], dim=0)
-
             with torch.no_grad():
-                outputs = self.model(image, target)
+                outputs, _, _= self.model(image, target)
                 targets = self.generate_target(target, eval=True)
 
                 losses = list()
@@ -181,6 +172,7 @@ class Trainer(object):
         plt.savefig(args.experiment_dir + "/vis.png")
 
         printROCcurve(total_pred, total_target)
+
         return total_roc, total_pr
 
     def save_weights(self, filename):
@@ -266,7 +258,7 @@ if __name__ == '__main__':
     parser.add_argument("--topk", type=float, default=0.1, help="topk in MIL")
     parser.add_argument('--know_class', type=str, default=None, help="set the know class for hard setting")
     parser.add_argument('--pretrain_dir', type=str, default=None, help="root of pretrain weight")
-    parser.add_argument("--total_heads", type=int, default=4, help="number of head in training")
+    parser.add_argument("--total_heads", type=int, default=3, help="number of head in training")
     parser.add_argument("--nRef", type=int, default=5, help="number of reference set")
     parser.add_argument('--outlier_root', type=str, default=None, help="OOD dataset root")
     args = parser.parse_args()
