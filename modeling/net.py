@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from modeling.networks.backbone import build_feature_extractor, NET_OUT_DIM
+from modeling.layers import build_criterion
 
 
 class HolisticHead(nn.Module):
@@ -69,15 +70,16 @@ class subNet(nn.Module):
         return F.normalize(x)
     
 class AssistNet(nn.Module):
-    def __init__(self, input_size=128, hidden_size=512, output_size=1):
+    def __init__(self, input_size=128, hidden_size=256, output_size=1):
         super(AssistNet, self).__init__()
         self.fc1 = nn.Linear(input_size, hidden_size)
         self.fc2 = nn.Linear(hidden_size, output_size)
 
     def forward(self, x):
-        x = F.relu(self.fc1(x))
+        x = F.leaky_relu(self.fc1(F.normalize(x)))
         x = self.fc2(x)
-        return torch.abs(x)
+        return x
+
 
 class DRA(nn.Module):
     def __init__(self, cfg, backbone="resnet18"):
@@ -91,11 +93,15 @@ class DRA(nn.Module):
         self.composite_head = CompositeHead(self.in_c, self.cfg.topk)
 
         self.exchangeNet = subNet(self.in_c)
-        self.protos = F.normalize(torch.randn(size=(3, 128), requires_grad=True)).cuda()
+        # self.protos = F.normalize(torch.randn(size=(3, 128), requires_grad=True)).cuda()
+        self.protos = nn.Parameter(torch.randn(size=(3, 128)), requires_grad=True).cuda()
         self.assist1 = AssistNet()
         self.assist2 = AssistNet()
         self.assist3 = AssistNet()
-        self.criterian = nn.BCEWithLogitsLoss()
+        
+        self.criterionType = 'deviation' # CE deviation
+        self.criterian = build_criterion(self.criterionType)
+
 
     def forward(self, image, label):
         image_pyramid = list()
@@ -133,14 +139,23 @@ class DRA(nn.Module):
             embeddings = F.normalize(torch.cat(embedsList, dim=0))
             embedLabel = self.getEmbedLabel(label)
             embedGroups, lossComp = self.updateProtos(embeddings, embedLabel)
-            assistScores, assistloss = self.assistScore(embedGroups)
+            _, assistloss = self.assistScore(embedGroups)
             lossProto = self.lossProto()
             tmpLoss = lossComp + lossProto + assistloss
             # image_pyramid.append(assistScore)
 
-            return image_pyramid, tmpLoss
+            alpha = 0.1
+            return image_pyramid, alpha * tmpLoss
         else:
-            return image_pyramid
+            nembedList = [x[self.cfg.nRef:] for x in embedsList]
+            assistScores = list()
+            for nembed in nembedList:
+                score = self.assistScore(nembed)
+                assistScores.append(score)
+
+            assistScore = torch.stack(assistScores).mean(dim=0)
+            
+            return image_pyramid, assistScore   #  assistScore: 来自辅助网络的异常分数预测
     
     def getEmbedLabel(self, label):
         label1 = torch.cat((label, torch.zeros(self.cfg.nRef, dtype=label.dtype).cuda()))
@@ -183,7 +198,7 @@ class DRA(nn.Module):
             if num_i > 0:
                 nEmbed_i = n_embeddings[mask]
                 self.protos[i] = F.normalize((1 - beta) * self.protos[i].detach() + beta * nEmbed_i.mean(dim=0), p=2, dim=0)
-                loss = 1 - torch.cosine_similarity(self.protos[i].unsqueeze(0).unsqueeze(1).detach(), nEmbed_i.unsqueeze(0), dim=2).sum() / num_i
+                loss = 1 - torch.cosine_similarity(self.protos[i].unsqueeze(0).unsqueeze(1).detach(), nEmbed_i.unsqueeze(0), dim=2).mean()
                 lossComp += loss
                 aEmbed_i = self.getaEmbeddings(a_embeddings, num_i)
                 embedGroups.append([nEmbed_i, aEmbed_i])
@@ -214,24 +229,42 @@ class DRA(nn.Module):
     
     
     def assistScore(self, embedGroups):
-        nGroup = len(embedGroups)
-        
-        loss = torch.tensor(0.).cuda()
-        if nGroup == 3:
-            score1 = self.assist1(torch.cat(embedGroups[0], dim=0)).squeeze()
-            score2 = self.assist1(torch.cat(embedGroups[1], dim=0)).squeeze()
-            score3 = self.assist1(torch.cat(embedGroups[1], dim=0)).squeeze()
-            scores = [score1, score2, score3]
+        nGroup = self.protos.shape[0]
+        scores = list()
+        if self.training:
+            loss = torch.tensor(0.).cuda()
+            if nGroup == 3:
+                score1 = self.assist1(torch.cat(embedGroups[0], dim=0)).squeeze()
+                score2 = self.assist1(torch.cat(embedGroups[1], dim=0)).squeeze()
+                score3 = self.assist1(torch.cat(embedGroups[2], dim=0)).squeeze()
+                scores.append(score1)
+                scores.append(score2)
+                scores.append(score3)
 
-            for i in range(3):
+            for i in range(nGroup):
                 score = scores[i]
                 n = score.shape[0]
                 label = torch.zeros(n).cuda()
                 label[n//2:] = 1
-                loss += self.criterian(score, label)
-
-            return scores, loss
-
+                # loss += self.criterian(score, label)
+                if self.criterionType == 'CE':
+                    prob = F.softmax(score)
+                    loss += self.criterian(prob, label.float())
+                else:
+                    loss += self.criterian(score, label.float())
+            return scores, loss / nGroup
+        else :
+            if nGroup == 3:
+                score1 = self.assist1(embedGroups).squeeze()
+                score2 = self.assist1(embedGroups).squeeze()
+                score3 = self.assist1(embedGroups).squeeze()
+                scores.append(score1)
+                scores.append(score2)
+                scores.append(score3)
+                
+            score = torch.stack(scores).max(dim=0)[0]
+            return score
+                
         
 
     

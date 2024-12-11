@@ -105,7 +105,8 @@ class Trainer(object):
             for i in range(self.args.total_heads):
                 class_loss[i] += losses[i].item()
 
-            tbar.set_description('Epoch:%d, Train loss: %.3f' % (epoch, train_loss / (idx + 1)))
+            # tbar.set_description('Epoch:%d, Train loss: %.3f' % (epoch, train_loss / (idx + 1)))
+            tbar.set_description(f'Epoch:{epoch}, Train loss: {train_loss / (idx + 1):.3f}, h: {losses[0].item():.3f}, s: {losses[1].item():.3f}, p: {losses[2].item():.3f}, c: {losses[3].item():.3f}, proto: {losses[4].item():.3f}')
             writer.add_scalar('train_loss', loss.item(), epoch * len(self.train_loader) + sample['image'].shape[0])
 
 
@@ -117,6 +118,7 @@ class Trainer(object):
         tbar = tqdm(self.test_loader, desc='\r')
         test_loss = 0.0
         class_pred = list()
+        assistPred = np.array([])
         for i in range(self.args.total_heads):
             class_pred.append(np.array([]))
         total_target = np.array([])
@@ -135,7 +137,8 @@ class Trainer(object):
                 image = torch.cat([ref_image, image], dim=0)
 
             with torch.no_grad():
-                outputs = self.model(image, target)
+                outputs, assistOut = self.model(image, target)
+                assistPred = np.append(assistPred, assistOut.data.cpu().numpy())
                 targets = self.generate_target(target, eval=True)
 
                 losses = list()
@@ -167,9 +170,10 @@ class Trainer(object):
 
         total_roc, total_pr = aucPerformance(total_pred, total_target)
 
+        
         with open(self.args.experiment_dir + '/result.txt', mode='a+', encoding="utf-8") as w:
-            for label, score in zip(total_target, total_pred):
-                w.write(str(label) + '   ' + str(score) + "\n")
+            for label, score, assistScore in zip(total_target, total_pred, assistPred):
+                w.write(f'{str(label)}\t\t{score:.3f}\t\t{assistScore:.3f}\n')
             w.write("AUC-ROC: " + str(total_roc) + "\nAUC-PR: " + str(total_pr))
 
         normal_mask = total_target == 0
