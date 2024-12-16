@@ -28,9 +28,9 @@ python train.py --dataset=mvtecad       --dataset_root=/root/autodl-tmp/ad_wxf/a
 # python train.py --dataset=mvtecad       --dataset_root=/root/autodl-tmp/ad_wxf/ad_dataset/mvtec_anomaly_detection       --classname=bottle          --know_class=None --nAnomaly=1 &&
 # python train.py --dataset=mvtecad       --dataset_root=/root/autodl-tmp/ad_wxf/ad_dataset/mvtec_anomaly_detection       --classname=bottle          --know_class=None --nAnomaly=1 &&
 
-# python train.py --dataset=mvtecad       --dataset_root=/root/autodl-tmp/ad_wxf/ad_dataset/mvtec_anomaly_detection       --classname=capsule         --know_class=None --nAnomaly=1 &&
-# python train.py --dataset=mvtecad       --dataset_root=/root/autodl-tmp/ad_wxf/ad_dataset/mvtec_anomaly_detection       --classname=capsule         --know_class=None --nAnomaly=1 &&
-# python train.py --dataset=mvtecad       --dataset_root=/root/autodl-tmp/ad_wxf/ad_dataset/mvtec_anomaly_detection       --classname=capsule         --know_class=None --nAnomaly=1 &&
+python train.py --dataset=mvtecad       --dataset_root=/root/autodl-tmp/ad_wxf/ad_dataset/mvtec_anomaly_detection       --classname=capsule         --know_class=None --nAnomaly=1 &&
+python train.py --dataset=mvtecad       --dataset_root=/root/autodl-tmp/ad_wxf/ad_dataset/mvtec_anomaly_detection       --classname=capsule         --know_class=None --nAnomaly=1 &&
+python train.py --dataset=mvtecad       --dataset_root=/root/autodl-tmp/ad_wxf/ad_dataset/mvtec_anomaly_detection       --classname=capsule         --know_class=None --nAnomaly=1 &&
 
 # python train.py --dataset=mvtecad       --dataset_root=/root/autodl-tmp/ad_wxf/ad_dataset/mvtec_anomaly_detection       --classname=pill            --know_class=None --nAnomaly=1 &&
 # python train.py --dataset=mvtecad       --dataset_root=/root/autodl-tmp/ad_wxf/ad_dataset/mvtec_anomaly_detection       --classname=pill            --know_class=None --nAnomaly=1 &&
