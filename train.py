@@ -111,7 +111,18 @@ class Trainer(object):
 
 
     def normalization(self, data):
+        # f_norm = np.linalg.norm(data)
+        # # 进行F-norm归一化
+        # normalized_data = data / f_norm
+        # return normalized_data
         return data
+    
+    def minMaxnorm(self, data):
+        min_val = np.min(data)
+        max_val = np.max(data)
+        normalized_data = (data - min_val) / (max_val - min_val)
+        return normalized_data
+        
 
     def eval(self):
         self.model.eval()
@@ -167,14 +178,19 @@ class Trainer(object):
         total_pred = self.normalization(class_pred[0])
         for i in range(1, self.args.total_heads):
             total_pred = total_pred + self.normalization(class_pred[i])
+        total_pred = total_pred + assistPred
+        # total_pred = self.minMaxnorm(total_pred)
 
         total_roc, total_pr = aucPerformance(total_pred, total_target)
+        # total_roc_A, total_pr_A = aucPerformance(assistPred, total_target)
 
         
         with open(self.args.experiment_dir + '/result.txt', mode='a+', encoding="utf-8") as w:
             for label, score, assistScore in zip(total_target, total_pred, assistPred):
-                w.write(f'{str(label)}\t\t{score:.3f}\t\t{assistScore:.3f}\n')
+                # w.write(f'{str(label)}\t\t{score:.3f}\t\t{assistScore:.3f}\n')
+                w.write(f'{str(label)}\t\t{score:.3f}\n')
             w.write("AUC-ROC: " + str(total_roc) + "\nAUC-PR: " + str(total_pr))
+            # w.write("AUC-ROC_A: " + str(total_roc_A) + "\nAUC-PR_A: " + str(total_pr_A))
 
         normal_mask = total_target == 0
         outlier_mask = total_target == 1
@@ -273,6 +289,7 @@ if __name__ == '__main__':
     parser.add_argument("--total_heads", type=int, default=4, help="number of head in training")
     parser.add_argument("--nRef", type=int, default=5, help="number of reference set")
     parser.add_argument('--outlier_root', type=str, default=None, help="OOD dataset root")
+    parser.add_argument('--diversE_num', type=str, default=None, help="number of protos")
     args = parser.parse_args()
 
     args.cuda = not args.no_cuda and torch.cuda.is_available()

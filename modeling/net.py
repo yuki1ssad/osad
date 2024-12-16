@@ -95,9 +95,12 @@ class DRA(nn.Module):
         self.exchangeNet = subNet(self.in_c)
         # self.protos = F.normalize(torch.randn(size=(3, 128), requires_grad=True)).cuda()
         self.protos = nn.Parameter(torch.randn(size=(3, 128)), requires_grad=True).cuda()
-        self.assist1 = AssistNet()
-        self.assist2 = AssistNet()
-        self.assist3 = AssistNet()
+        # self.assist1 = AssistNet()
+        # self.assist2 = AssistNet()
+        # self.assist3 = AssistNet()
+        self.assist1 = PlainHead(self.in_c, self.cfg.topk)
+        self.assist2 = PlainHead(self.in_c, self.cfg.topk)
+        self.assist3 = PlainHead(self.in_c, self.cfg.topk)
         
         self.criterionType = 'deviation' # CE deviation
         self.criterian = build_criterion(self.criterionType)
@@ -109,11 +112,13 @@ class DRA(nn.Module):
             image_pyramid.append(list())
 
         embedsList = list()
+        featsList = list()
         for s in range(self.cfg.n_scales):
             image_scaled = F.interpolate(image, size=self.cfg.img_size // (2 ** s)) if s > 0 else image
             feature = self.feature_extractor(image_scaled)  # torch.Size([53, 512, 14, 14]) torch.Size([53, 512, 7, 7])
 
             embedsList.append(self.exchangeNet(feature))
+            featsList.append(feature)
 
             ref_feature = feature[:self.cfg.nRef, :, :, :]
             feature = feature[self.cfg.nRef:, :, :, :]
@@ -136,21 +141,23 @@ class DRA(nn.Module):
             image_pyramid[i] = torch.mean(image_pyramid[i], dim=1)
 
         if self.training:
-            embeddings = F.normalize(torch.cat(embedsList, dim=0))
+            embeds, feats0, feats1 = embedsList[0], featsList[0], featsList[1]
+            embeddings = F.normalize(embeds)
             embedLabel = self.getEmbedLabel(label)
-            embedGroups, lossComp = self.updateProtos(embeddings, embedLabel)
-            _, assistloss = self.assistScore(embedGroups)
+            embedGroups0, embedGroups1, lossComp = self.updateProtos(feats0, feats1, embeddings, embedLabel)
+            _, assistloss0 = self.assistScore(embedGroups0)
+            _, assistloss1 = self.assistScore(embedGroups1)
+            assistloss = (assistloss0 + assistloss1) / 2
             lossProto = self.lossProto()
-            tmpLoss = lossComp + lossProto + assistloss
-            # image_pyramid.append(assistScore)
 
             alpha = 0.1
-            return image_pyramid, alpha * tmpLoss
+            tmpLoss = alpha * (lossComp + lossProto) + assistloss            
+            return image_pyramid, tmpLoss
         else:
-            nembedList = [x[self.cfg.nRef:] for x in embedsList]
+            testfeatsList = [x[self.cfg.nRef:] for x in featsList]
             assistScores = list()
-            for nembed in nembedList:
-                score = self.assistScore(nembed)
+            for feat in testfeatsList:
+                score = self.assistScore(feat)
                 assistScores.append(score)
 
             assistScore = torch.stack(assistScores).mean(dim=0)
@@ -158,16 +165,21 @@ class DRA(nn.Module):
             return image_pyramid, assistScore   #  assistScore: 来自辅助网络的异常分数预测
     
     def getEmbedLabel(self, label):
-        label1 = torch.cat((label, torch.zeros(self.cfg.nRef, dtype=label.dtype).cuda()))
-        label1_combined = torch.cat((label1, label1))
-        return label1_combined
+        label1 = torch.cat((torch.zeros(self.cfg.nRef, dtype=label.dtype).cuda(), label))
+        # label1_combined = torch.cat((label1, label1))
+        # return label1_combined
+        return label1
 
 
-    def updateProtos(self, embeddings, embedLabel):
+    def updateProtos(self, feats0, feats1, embeddings, embedLabel):
         # updateProtos
         n_embeddings = embeddings[embedLabel==0]
+        n_feats0 = feats0[embedLabel==0]
+        n_feats1 = feats1[embedLabel==0]
         a_embeddings = embeddings[embedLabel!=0]
-        beta = 0.1
+        a_feats0 = feats0[embedLabel!=0]
+        a_feats1 = feats1[embedLabel!=0]
+        beta = 0.01
         protoNum = self.protos.shape[0]
         similarity_matrix = torch.cosine_similarity(self.protos.unsqueeze(1), n_embeddings.unsqueeze(0), dim=2)
         # closest_proto_indices = torch.argmax(similarity_matrix, dim=0)
@@ -191,21 +203,30 @@ class DRA(nn.Module):
             unassigned_protos = torch.where(~assigned_protos)[0]
         # 防止某个proto没有对应的embedding
         embedGroups = list()    # (normal, abnormal)
+        featsGroups0 = list()    # (normal, abnormal)
+        featsGroups1 = list()    # (normal, abnormal)
         lossComp = torch.zeros_like(self.protos).sum()
         for i in range(protoNum):
             mask = closest_proto_indices==i
             num_i = mask.sum()
             if num_i > 0:
                 nEmbed_i = n_embeddings[mask]
+                nFeats_i0 = n_feats0[mask]
+                nFeats_i1 = n_feats1[mask]
                 self.protos[i] = F.normalize((1 - beta) * self.protos[i].detach() + beta * nEmbed_i.mean(dim=0), p=2, dim=0)
                 loss = 1 - torch.cosine_similarity(self.protos[i].unsqueeze(0).unsqueeze(1).detach(), nEmbed_i.unsqueeze(0), dim=2).mean()
                 lossComp += loss
-                aEmbed_i = self.getaEmbeddings(a_embeddings, num_i)
-                embedGroups.append([nEmbed_i, aEmbed_i])
+                # aEmbed_i = self.getaEmbeddings(a_embeddings, num_i)
+                aFeats_i0 = self.getaFeats(a_feats0, num_i)
+                aFeats_i1 = self.getaFeats(a_feats1, num_i)
+                # embedGroups.append([nEmbed_i, aEmbed_i])
+                featsGroups0.append([nFeats_i0, aFeats_i0])
+                featsGroups1.append([nFeats_i1, aFeats_i1])
             else:
                 embedGroups.append([])
 
-        return embedGroups, lossComp / protoNum
+        # return embedGroups, lossComp / protoNum
+        return featsGroups0, featsGroups1, lossComp / protoNum
     
     def getaEmbeddings(self, aEmbeddings, num):
         n = aEmbeddings.shape[0]
@@ -218,6 +239,19 @@ class DRA(nn.Module):
             random_indices = (torch.randint(0, new_n, (num,)) % n)
         
         return aEmbeddings[random_indices]
+
+    def getaFeats(self, aFeats, num):
+        n = aFeats.shape[0]
+        if num <= n:
+            random_indices = (torch.randint(0, n, (num,)))
+        else:
+            new_n = n
+            while num > new_n:
+                new_n *= 2
+            random_indices = (torch.randint(0, new_n, (num,)) % n)
+        
+        return aFeats[random_indices]
+    
     
     def lossProto(self):
         protoNum = self.protos.shape[0]
@@ -262,7 +296,8 @@ class DRA(nn.Module):
                 scores.append(score2)
                 scores.append(score3)
                 
-            score = torch.stack(scores).max(dim=0)[0]
+            # score = torch.stack(scores).max(dim=0)[0]
+            score = torch.stack(scores).mean(dim=0)
             return score
                 
         
