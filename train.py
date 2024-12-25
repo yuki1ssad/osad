@@ -289,7 +289,10 @@ if __name__ == '__main__':
     parser.add_argument("--total_heads", type=int, default=4, help="number of head in training")
     parser.add_argument("--nRef", type=int, default=5, help="number of reference set")
     parser.add_argument('--outlier_root', type=str, default=None, help="OOD dataset root")
-    parser.add_argument('--diversE_num', type=str, default=None, help="number of protos")
+
+    parser.add_argument('--numProtos', type=int, default=3, help="number of protos")
+    parser.add_argument('--beta', type=float, default=0.01, help="factor to update protos")
+    parser.add_argument('--cdfl', type=bool, default=False, help="ablation of cdfl module")
     args = parser.parse_args()
 
     args.cuda = not args.no_cuda and torch.cuda.is_available()

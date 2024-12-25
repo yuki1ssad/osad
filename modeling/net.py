@@ -93,17 +93,34 @@ class DRA(nn.Module):
         self.composite_head = CompositeHead(self.in_c, self.cfg.topk)
 
         self.exchangeNet = subNet(self.in_c)
-        # self.protos = F.normalize(torch.randn(size=(3, 128), requires_grad=True)).cuda()
-        self.protos = nn.Parameter(torch.randn(size=(3, 128)), requires_grad=True).cuda()
-        # self.assist1 = AssistNet()
-        # self.assist2 = AssistNet()
-        # self.assist3 = AssistNet()
-        self.assist1 = PlainHead(self.in_c, self.cfg.topk)
-        self.assist2 = PlainHead(self.in_c, self.cfg.topk)
-        self.assist3 = PlainHead(self.in_c, self.cfg.topk)
+
+        self.numProtos = cfg.numProtos
+        self.protos = nn.Parameter(torch.randn(size=(self.numProtos, 128)), requires_grad=True).cuda()
+        if self.numProtos == 2:
+            self.assist1 = PlainHead(self.in_c, self.cfg.topk)
+            self.assist2 = PlainHead(self.in_c, self.cfg.topk)
+        elif self.numProtos == 3:
+            self.assist1 = PlainHead(self.in_c, self.cfg.topk)
+            self.assist2 = PlainHead(self.in_c, self.cfg.topk)
+            self.assist3 = PlainHead(self.in_c, self.cfg.topk)
+        elif self.numProtos == 4:
+            self.assist1 = PlainHead(self.in_c, self.cfg.topk)
+            self.assist2 = PlainHead(self.in_c, self.cfg.topk)
+            self.assist3 = PlainHead(self.in_c, self.cfg.topk)
+            self.assist4 = PlainHead(self.in_c, self.cfg.topk)
+        elif self.numProtos == 5:
+            self.assist1 = PlainHead(self.in_c, self.cfg.topk)
+            self.assist2 = PlainHead(self.in_c, self.cfg.topk)
+            self.assist3 = PlainHead(self.in_c, self.cfg.topk)
+            self.assist4 = PlainHead(self.in_c, self.cfg.topk)
+            self.assist5 = PlainHead(self.in_c, self.cfg.topk)
+
+        self.beta = cfg.beta
         
         self.criterionType = 'deviation' # CE deviation
         self.criterian = build_criterion(self.criterionType)
+
+        self.cdfl = cfg.cdfl    # ablation of cdfl module
 
 
     def forward(self, image, label):
@@ -148,6 +165,10 @@ class DRA(nn.Module):
             _, assistloss0 = self.assistScore(embedGroups0)
             _, assistloss1 = self.assistScore(embedGroups1)
             assistloss = (assistloss0 + assistloss1) / 2
+
+            if self.cdfl:
+                assistloss = assistloss * 0.
+
             lossProto = self.lossProto()
 
             alpha = 0.1
@@ -161,6 +182,9 @@ class DRA(nn.Module):
                 assistScores.append(score)
 
             assistScore = torch.stack(assistScores).mean(dim=0)
+
+            if self.cdfl:
+                assistScore = assistScore * 0.
             
             return image_pyramid, assistScore   #  assistScore: 来自辅助网络的异常分数预测
     
@@ -179,7 +203,7 @@ class DRA(nn.Module):
         a_embeddings = embeddings[embedLabel!=0]
         a_feats0 = feats0[embedLabel!=0]
         a_feats1 = feats1[embedLabel!=0]
-        beta = 0.01
+        # beta = 0.01
         protoNum = self.protos.shape[0]
         similarity_matrix = torch.cosine_similarity(self.protos.unsqueeze(1), n_embeddings.unsqueeze(0), dim=2)
         # closest_proto_indices = torch.argmax(similarity_matrix, dim=0)
@@ -213,7 +237,7 @@ class DRA(nn.Module):
                 nEmbed_i = n_embeddings[mask]
                 nFeats_i0 = n_feats0[mask]
                 nFeats_i1 = n_feats1[mask]
-                self.protos[i] = F.normalize((1 - beta) * self.protos[i].detach() + beta * nEmbed_i.mean(dim=0), p=2, dim=0)
+                self.protos[i] = F.normalize((1 - self.beta) * self.protos[i].detach() + self.beta * nEmbed_i.mean(dim=0), p=2, dim=0)
                 loss = 1 - torch.cosine_similarity(self.protos[i].unsqueeze(0).unsqueeze(1).detach(), nEmbed_i.unsqueeze(0), dim=2).mean()
                 lossComp += loss
                 # aEmbed_i = self.getaEmbeddings(a_embeddings, num_i)
@@ -267,13 +291,38 @@ class DRA(nn.Module):
         scores = list()
         if self.training:
             loss = torch.tensor(0.).cuda()
-            if nGroup == 3:
+            if nGroup == 2:
                 score1 = self.assist1(torch.cat(embedGroups[0], dim=0)).squeeze()
-                score2 = self.assist1(torch.cat(embedGroups[1], dim=0)).squeeze()
-                score3 = self.assist1(torch.cat(embedGroups[2], dim=0)).squeeze()
+                score2 = self.assist2(torch.cat(embedGroups[1], dim=0)).squeeze()
+                scores.append(score1)
+                scores.append(score2)
+            elif nGroup == 3:
+                score1 = self.assist1(torch.cat(embedGroups[0], dim=0)).squeeze()
+                score2 = self.assist2(torch.cat(embedGroups[1], dim=0)).squeeze()
+                score3 = self.assist3(torch.cat(embedGroups[2], dim=0)).squeeze()
                 scores.append(score1)
                 scores.append(score2)
                 scores.append(score3)
+            elif nGroup == 4:
+                score1 = self.assist1(torch.cat(embedGroups[0], dim=0)).squeeze()
+                score2 = self.assist2(torch.cat(embedGroups[1], dim=0)).squeeze()
+                score3 = self.assist3(torch.cat(embedGroups[2], dim=0)).squeeze()
+                score4 = self.assist4(torch.cat(embedGroups[2], dim=0)).squeeze()
+                scores.append(score1)
+                scores.append(score2)
+                scores.append(score3)
+                scores.append(score4)
+            elif nGroup == 5:
+                score1 = self.assist1(torch.cat(embedGroups[0], dim=0)).squeeze()
+                score2 = self.assist2(torch.cat(embedGroups[1], dim=0)).squeeze()
+                score3 = self.assist3(torch.cat(embedGroups[2], dim=0)).squeeze()
+                score4 = self.assist4(torch.cat(embedGroups[2], dim=0)).squeeze()
+                score5 = self.assist5(torch.cat(embedGroups[2], dim=0)).squeeze()
+                scores.append(score1)
+                scores.append(score2)
+                scores.append(score3)
+                scores.append(score4)
+                scores.append(score5)
 
             for i in range(nGroup):
                 score = scores[i]
@@ -288,13 +337,38 @@ class DRA(nn.Module):
                     loss += self.criterian(score, label.float())
             return scores, loss / nGroup
         else :
-            if nGroup == 3:
+            if nGroup == 2:
                 score1 = self.assist1(embedGroups).squeeze()
-                score2 = self.assist1(embedGroups).squeeze()
-                score3 = self.assist1(embedGroups).squeeze()
+                score2 = self.assist2(embedGroups).squeeze()
+                scores.append(score1)
+                scores.append(score2)
+            elif nGroup == 3:
+                score1 = self.assist1(embedGroups).squeeze()
+                score2 = self.assist2(embedGroups).squeeze()
+                score3 = self.assist3(embedGroups).squeeze()
                 scores.append(score1)
                 scores.append(score2)
                 scores.append(score3)
+            elif nGroup == 4:
+                score1 = self.assist1(embedGroups).squeeze()
+                score2 = self.assist2(embedGroups).squeeze()
+                score3 = self.assist3(embedGroups).squeeze()
+                score4 = self.assist4(embedGroups).squeeze()
+                scores.append(score1)
+                scores.append(score2)
+                scores.append(score3)
+                scores.append(score4)
+            elif nGroup == 5:
+                score1 = self.assist1(embedGroups).squeeze()
+                score2 = self.assist2(embedGroups).squeeze()
+                score3 = self.assist3(embedGroups).squeeze()
+                score4 = self.assist4(embedGroups).squeeze()
+                score5 = self.assist5(embedGroups).squeeze()
+                scores.append(score1)
+                scores.append(score2)
+                scores.append(score3)
+                scores.append(score4)
+                scores.append(score5)
                 
             # score = torch.stack(scores).max(dim=0)[0]
             score = torch.stack(scores).mean(dim=0)
