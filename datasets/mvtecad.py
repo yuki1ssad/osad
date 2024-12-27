@@ -154,7 +154,10 @@ class MVTecAD(BaseADDataset):
             if self.ood_data is None:
                 index = random.choice(self.normal_idx)  # 从序列中随机选择一个元素
                 image = self.load_image(os.path.join(self.root, self.images[index]))
-                transform = self.transform_pseudo
+                if self.args.sftransform == True:   # for save features
+                    transform = self.transform
+                else:
+                    transform = self.transform_pseudo
             else:
                 image = self.load_image(random.choice(self.ood_data))
                 transform = self.transform

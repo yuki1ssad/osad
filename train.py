@@ -26,13 +26,18 @@ class Trainer(object):
         self.args = args
         # Define Dataloader
         kwargs = {'num_workers': args.workers}
-        self.train_loader, self.test_loader= initDataloader.build(args, **kwargs)
+        self.train_loader, self.test_loader, _= initDataloader.build(args, **kwargs)
         if self.args.total_heads == 4:
             temp_args = copy.deepcopy(args)
             temp_args.batch_size = self.args.nRef
             temp_args.nAnomaly = 0
-            self.ref_loader, _ = initDataloader.build(temp_args, **kwargs)
+            self.ref_loader, _, _ = initDataloader.build(temp_args, **kwargs)
             self.ref = iter(self.ref_loader)
+
+            # for save features
+            temp_args1 = copy.deepcopy(args)
+            temp_args1.sftransform = True
+            _, _, self.sf_loader = initDataloader.build(temp_args1, **kwargs)
 
         self.model = DRA(args, backbone=self.args.backbone)
 
@@ -109,6 +114,51 @@ class Trainer(object):
             tbar.set_description(f'Epoch:{epoch}, Train loss: {train_loss / (idx + 1):.3f}, h: {losses[0].item():.3f}, s: {losses[1].item():.3f}, p: {losses[2].item():.3f}, c: {losses[3].item():.3f}, proto: {losses[4].item():.3f}')
             writer.add_scalar('train_loss', loss.item(), epoch * len(self.train_loader) + sample['image'].shape[0])
 
+    def saveFeatures(self):
+        self.model.eval()
+        # train_features
+        tbar = tqdm(self.sf_loader)
+        train_features = []
+        labels = []
+        for idx, sample in enumerate(tbar):
+            image, target = sample['image'], sample['label']
+            target[target == 2] = 0
+            if self.args.cuda:
+                image, target = image.cuda(), target.cuda()
+
+            embeds = self.model(image, target, self.args.epochs)     # 四个头，每个头为每张图输出一个分数
+            train_features.append(embeds.detach().cpu().numpy())
+            # labels.append(target.detach().cpu().numpy())
+            
+            tbar.set_description(f'Epoch:{self.args.epochs}, Saving train_features...')
+        # 将特征和标签转换为numpy数组
+        train_features = np.concatenate(train_features, axis=0)
+        # labels = np.concatenate(labels, axis=0)
+        # 保存特征和标签
+        np.save(f'{self.args.experiment_dir}/train_features.npy', train_features)
+        # np.save(f'{self.args.experiment_dir}/labels.npy', labels)
+        
+        # test_features
+        tbar = tqdm(self.test_loader)
+        test_features = []
+        test_labels = []
+        for idx, sample in enumerate(tbar):
+            image, target = sample['image'], sample['label']
+            target[target == 2] = 0
+            if self.args.cuda:
+                image, target = image.cuda(), target.cuda()
+
+            embeds = self.model(image, target, self.args.epochs)     # 四个头，每个头为每张图输出一个分数
+            test_features.append(embeds.detach().cpu().numpy())
+            test_labels.append(target.detach().cpu().numpy())
+            
+            tbar.set_description(f'Epoch:{self.args.epochs}, Saving test_features...')
+        # 将特征和标签转换为numpy数组
+        test_features = np.concatenate(test_features, axis=0)
+        test_labels = np.concatenate(test_labels, axis=0)
+        # 保存特征和标签
+        np.save(f'{self.args.experiment_dir}/test_features.npy', train_features)
+        np.save(f'{self.args.experiment_dir}/test_labels.npy', labels)
 
     def normalization(self, data):
         # f_norm = np.linalg.norm(data)
@@ -293,6 +343,8 @@ if __name__ == '__main__':
     parser.add_argument('--numProtos', type=int, default=3, help="number of protos")
     parser.add_argument('--beta', type=float, default=0.01, help="factor to update protos")
     parser.add_argument('--cdfl', type=bool, default=False, help="ablation of cdfl module")
+    parser.add_argument('--sf', type=bool, default=False, help="save features")
+    parser.add_argument('--sftransform', type=bool, default=False, help="when save features, dataloader's transform")
     args = parser.parse_args()
 
     args.cuda = not args.no_cuda and torch.cuda.is_available()
@@ -314,6 +366,11 @@ if __name__ == '__main__':
     trainer.criterion = trainer.criterion.to('cuda')
     for epoch in range(0, trainer.args.epochs):
         trainer.training(epoch)
+    
+    # save features
+    if args.sf == True:
+        trainer.saveFeatures()
+
     writer.close()
     trainer.eval()
     trainer.save_weights(args.savename)

@@ -121,9 +121,12 @@ class DRA(nn.Module):
         self.criterian = build_criterion(self.criterionType)
 
         self.cdfl = cfg.cdfl    # ablation of cdfl module
+        # self.sf = cfg.sf
+        # self.dir = cfg.experiment_dir
+        self.epochs = cfg.epochs
 
 
-    def forward(self, image, label):
+    def forward(self, image, label, epoch=0):
         image_pyramid = list()
         for i in range(self.cfg.total_heads):
             image_pyramid.append(list())
@@ -134,8 +137,13 @@ class DRA(nn.Module):
             image_scaled = F.interpolate(image, size=self.cfg.img_size // (2 ** s)) if s > 0 else image
             feature = self.feature_extractor(image_scaled)  # torch.Size([53, 512, 14, 14]) torch.Size([53, 512, 7, 7])
 
-            embedsList.append(self.exchangeNet(feature))
+            embeds = self.exchangeNet(feature)
+            embedsList.append(embeds)
             featsList.append(feature)
+
+            # save features
+            if epoch == self.epochs:
+                return embeds
 
             ref_feature = feature[:self.cfg.nRef, :, :, :]
             feature = feature[self.cfg.nRef:, :, :, :]

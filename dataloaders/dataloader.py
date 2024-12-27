@@ -18,6 +18,11 @@ class initDataloader():
                                     shuffle=False,
                                     worker_init_fn= worker_init_fn_seed,
                                     **kwargs)
-        return train_loader, test_loader
+        sf_loader = DataLoader(train_set,
+                                    batch_size=args.batch_size,
+                                    shuffle=False,
+                                    worker_init_fn= worker_init_fn_seed,
+                                    **kwargs)
+        return train_loader, test_loader, sf_loader
         # else:
         #     raise NotImplementedError
